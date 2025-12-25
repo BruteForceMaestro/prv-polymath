@@ -1,0 +1,19 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+.env
+
+# --- Lean 4 Ignores ---
+# The build directory (binaries and intermediate files)
+lean_project/build/
+lean_project/.lake/
+
+# Downloaded dependencies (like the REPL library)
+lean_project/lake-packages/

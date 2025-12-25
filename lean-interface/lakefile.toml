@@ -1,0 +1,15 @@
+name = "lean-interface"
+version = "0.1.0"
+defaultTargets = ["lean-interface"]
+
+[[lean_lib]]
+name = "LeanInterface"
+
+[[lean_exe]]
+name = "lean-interface"
+root = "Main"
+
+[[require]]
+name = "repl"
+git = "https://github.com/leanprover-community/repl"
+rev = "master"
