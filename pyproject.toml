@@ -14,13 +14,10 @@ dependencies = [
     "opentelemetry-exporter-otlp-proto-grpc>=1.39.1",
     "opentelemetry-instrumentation-openai>=0.50.1",
     "opentelemetry-sdk>=1.39.1",
-    "polymath-schemas",
+    "polymath-schemas==0.2.0",
     "pydantic>=2.12.5",
     "python-dotenv>=1.2.1",
     "requests>=2.32.5",
     "sympy>=1.14.0",
     "uvicorn>=0.38.0",
 ]
-
-[tool.uv.sources]
-polymath-schemas = { path = "../polymath-schemas", editable = true }
