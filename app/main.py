@@ -1,15 +1,14 @@
+from app.agents.verifier_numeric import setup_executor
 from fastapi import FastAPI, BackgroundTasks
 from pydantic import BaseModel
 from app.agents.researcher import assign_researcher
 from fastapi.middleware.cors import CORSMiddleware
-from phoenix.otel import register
+from app.tracing import configure_tracing
 
-# This one line handles the TracerProvider, Exporter, and Auto-instrumentation
-tracer_provider = register(
-    project_name="autogen-research-agent",
-    endpoint="http://localhost:4317", # Points to your docker container
-    auto_instrument=True
-)
+
+# Configure custom tracing
+# Configure custom tracing
+configure_tracing(endpoint="http://localhost:4317")
 
 
 app = FastAPI()
@@ -35,11 +34,29 @@ class ProblemRequest(BaseModel):
 async def set_problem(request: ProblemRequest, background_tasks: BackgroundTasks):
 
     async def start_research():
-        return await assign_researcher(request.problem)
+        workflow = f"""
+        Solve the problem with the following workflow, utilizing your tools:
+        1. Check the graph for previous findings
+        2. Research literature if the axioms of the graph don't appear to be enough to solve the proof
+        3. Decision point: Is the problem simple enough to be solved by you alone? 
+            -  If yes, proceed to solve in a message, but do not submit
+            -  If no, proceed to use divide and conquer with subagents solving parts of the problem
+        4. After a solution proposition is composed, proceed to map the parts of the solution to the graph via Statements and Implications
+        5. Try to verify every Implication of the graph with Verifiers (Lean and SymPy/numeric).
+
+        The ultimate goal is solve this problem:
+        <problem>
+        {request.problem}
+        </problem>,
+        while maintaining graph scaffolding and verification for hallucination elimination.
+        """
+        return await assign_researcher(workflow)
 
     background_tasks.add_task(start_research)
     return {"status": "ok"}
 
 if __name__ == "__main__":
     import uvicorn
+
+    setup_executor() # threadpoolexecutor can't be inside other modules it breaks that
     uvicorn.run("app.main:app", host="0.0.0.0", port=8080, reload=True)

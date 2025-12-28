@@ -1,14 +1,16 @@
 import requests
+from app.tracing import traced
 from app.config import POLYMATH_SERVER_URL, POLYMATH_API_KEY
 from polymath_schemas.graph import VerificationLevel
 from polymath_schemas.api_requests import CreateStatement, CreateImplication, NodePatchRequest
 from polymath_schemas.api_responses import StatementRead
 from autogen_core.tools._base import BaseTool
-from typing import Union, Callable, Awaitable, Literal, Any
+from typing import Union, Callable, Awaitable, Literal, Any, Optional
 
 ToolType = Union[Callable[..., Awaitable[Any]], Callable[..., Any], BaseTool[Any, Any]]
 
-def make_graph_request(endpoint: str, body: Any = None, method: str = "POST"):
+def make_graph_request(endpoint: str, body: Any = None, method: str = "POST") -> dict | str:
+    response = None
     try:
         headers = {
             "X-API-Key": POLYMATH_API_KEY,
@@ -33,10 +35,23 @@ def make_graph_request(endpoint: str, body: Any = None, method: str = "POST"):
             )
         response.raise_for_status()
     except Exception as e:
-        return f"Exception in making graph request: {e}"
+        detail = "Detail not provided"
+        if response is not None:
+            # Check if the response is actually JSON before parsing
+            content_type = response.headers.get("Content-Type", "")
+            if "application/json" in content_type:
+                try:
+                    detail = response.json()
+                except ValueError:
+                    detail = response.text
+            else:
+                detail = response.text # Return raw HTML/Text if not JSON
+        
+        return f"Exception in making graph request: {e},\n\n Detail: {detail}"
     
     return response.json()
 
+@traced
 def observe_graph():
     """Provide a big picture view of the state of the art - the numerically or formally verified statements."""
     cypher_q = """
@@ -50,12 +65,14 @@ def observe_graph():
         body=cypher_q
     )
 
+@traced
 def get_node_info(node_id: str):
     """Get deeper information (history of changes, comment discussions, connected nodes) about a node."""
     return make_graph_request(
         endpoint=f"/graph/nodes/{node_id}"
     )
 
+@traced
 def invoke_axiom(lean_rep: str, human_rep: str):
     """Add a statement node to the graph, that is verified, and that has no supporting premises. 
     Used for commonly used, widely known results. 
@@ -64,7 +81,7 @@ def invoke_axiom(lean_rep: str, human_rep: str):
         human_rep=human_rep,
         lean_rep=lean_rep,
         category="Axiom",
-        verification=VerificationLevel.VERIFIED,
+        verification=int(VerificationLevel.VERIFIED),
         tags=["literature"]
     )
     return make_graph_request(
@@ -72,12 +89,13 @@ def invoke_axiom(lean_rep: str, human_rep: str):
         body=post_stmt.model_dump()
     )
 
+@traced
 def imply_new(
     premises_ids: list[str], 
     new_stmt_human: str,
     tactic_human: str, # how was the new stmt obtained
-    new_stmt_lean: str, 
-    tactic_lean: str,
+    new_stmt_lean: Optional[str], 
+    tactic_lean: Optional[str],
     logic_op: Literal['OR', 'AND'] = "AND",
     category: Literal['Theorem', 'Axiom', 'Definition', 'Lemma'] = "Lemma"
 ):
@@ -96,32 +114,31 @@ def imply_new(
         endpoint="/graph/query",
         body=cypher_q.replace("$ids", str(premises_ids)) # DEFINITELY inSECURE
     )
-    if result.startswith("Exception"):
-        # yeah, these premises ids not found
-        return "Premises IDs are invalid / not found in the graph."
+    assert isinstance(result, dict) # not an error
     
     # create a statement
     new_stmt = CreateStatement(
         human_rep=new_stmt_human,
-        lean_rep=new_stmt_lean,
-        verification=VerificationLevel.SPECULATIVE,
+        lean_rep=new_stmt_lean or "No Lean representation available.",
+        verification=int(VerificationLevel.SPECULATIVE),
         category=category
     )
-
-    filled_stmt = StatementRead.model_validate_json(
-        make_graph_request(
+    resp = make_graph_request(
             endpoint="/graph/nodes/statement",
             body=new_stmt.model_dump()
-        )
     )
+    if isinstance(resp, str):
+        raise Exception(resp)
+
+    filled_stmt = StatementRead.model_validate(resp)
 
     # create an implication
     new_impl = CreateImplication(
         human_rep=tactic_human,
-        lean_rep=tactic_lean,
+        lean_rep=tactic_lean or "No Lean representation avaliable.",
         premises_ids=premises_ids,
-        concludes_ids=filled_stmt.uid,
-        verification=VerificationLevel.SPECULATIVE,
+        concludes_ids=[filled_stmt.uid],
+        verification=int(VerificationLevel.SPECULATIVE),
         logic_op=logic_op
     )
 
@@ -130,6 +147,7 @@ def imply_new(
         body=new_impl.model_dump()
     )
 
+@traced
 def patch_node(patch: NodePatchRequest, node_id: str):
     """Make an edit to an existing node."""
     return make_graph_request(
@@ -138,6 +156,7 @@ def patch_node(patch: NodePatchRequest, node_id: str):
         method="PATCH"
     )
 
+@traced
 def comment_node(comment: str, node_id: str):
     """Comment on a node to detail your work done, results, approaches tried, so forth."""
     return make_graph_request(
@@ -145,6 +164,7 @@ def comment_node(comment: str, node_id: str):
         body=comment
     )
 
+@traced
 def cypher_query(cypher_q: str):
     """Cypher query interface for the graph database."""
     return make_graph_request(
@@ -152,9 +172,10 @@ def cypher_query(cypher_q: str):
         body=cypher_q
     )
 
+@traced
 def sql_query(sql_q: str):
     """SQL query interface for the SQL database."""
     return make_graph_request(
-        endpoint=f"/metadata/query",
+        endpoint=f"/graph/metadata/query",
         body=sql_q
     )

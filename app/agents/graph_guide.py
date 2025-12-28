@@ -1,7 +1,8 @@
 from app.graphtools import sql_query, cypher_query, ToolType
+from app.tracing import traced
 from autogen_agentchat.teams import RoundRobinGroupChat
 from autogen_agentchat.conditions import FunctionCallTermination
-from app.config import model_client
+from app.config import budget_model_client
 from app.work import AgentWork
 from autogen_agentchat.agents import AssistantAgent
 
@@ -24,10 +25,10 @@ The graph database uses `neomodel` for Object-Graph Mapping (OGM). Nodes derive 
 
 ### Common Properties (`PolymathBase`)
 All graph nodes (except `Tag`) share these properties:
-- `uid`: Unique identifier (UUID).
+- `uid`: Unique identifier (UUID), is a string.
 - `created_at`: Timestamp (UTC).
 - `updated_at`: Timestamp (UTC).
-- `author_id`: String (Agent ID).
+- `author_id`: int (Agent ID).
 - `human_rep`: String (Human-readable representation).
 - `lean_rep`: String (Lean representation).
 - `verification`: Integer (0: REJECTED, 1: SPECULATIVE, 2: NUMERICAL, 3: FORMAL_SKETCH, 4: VERIFIED).
@@ -103,6 +104,7 @@ by the original prompt, you can call the submit_answer tool to report
 the results.
 """
 
+@traced
 async def search_in_graph(nat_lang_query: str):
     """Allocates a sub-agent knowledgeable in the graph structure to find and query for some information you desire to find."""
     state = AgentWork()
@@ -112,7 +114,7 @@ async def search_in_graph(nat_lang_query: str):
 
     agent = AssistantAgent(
         name="graph_guide",
-        model_client=model_client,
+        model_client=budget_model_client,
         tools=agent_tools,
         system_message=graph_guide_sys,
     )
@@ -122,5 +124,5 @@ async def search_in_graph(nat_lang_query: str):
         termination_condition=FunctionCallTermination("submit_answer")
     )
 
-    await team.run(task=f"Answer the following search query: {nat_lang_query}")
+    await team.run(task=f"Find the nodes in the graph relating to this search query, not answering the search query itself, but sharing what progress is visible on the graph: <q>{nat_lang_query}</q>")
     return state.result

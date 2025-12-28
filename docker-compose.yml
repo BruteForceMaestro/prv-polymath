@@ -10,3 +10,11 @@ services:
       - PHOENIX_PORT=6006
       - PHOENIX_GRPC_PORT=4317
     restart: unless-stopped
+  lean_server:
+    image: projectnumina/kimina-lean-server:2.0.0
+    container_name: lean_server
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "8081:${LEAN_SERVER_PORT}"

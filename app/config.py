@@ -10,7 +10,8 @@ load_dotenv()
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "oopsie")
 POLYMATH_API_KEY = os.getenv("POLYMATH_API_KEY", 'oops')
-MODEL_RESEARCHER = "gpt-5.2"
+MODEL_RESEARCHER = "gpt-5.2" # when actually testing performance set to gpt-5.2
+MODEL_BUDGET = "gpt-5-mini" # nano turns out to be too stupid
 ENVIRONMENT = os.getenv("ENVIRONMENT", "dev")
 
 POLYMATH_SERVER_URL = "http://localhost:8000"
@@ -29,7 +30,15 @@ gpt5_info = ModelInfo(
 model_client = OpenAIChatCompletionClient(
     model=MODEL_RESEARCHER,
     api_key=OPENAI_API_KEY,
-    model_info=gpt5_info
+    model_info=gpt5_info,
+    timeout=600
+)
+
+budget_model_client = OpenAIChatCompletionClient(
+    model=MODEL_BUDGET,
+    api_key=OPENAI_API_KEY,
+    model_info=gpt5_info,
+    timeout=600
 )
 
 semaphore = None

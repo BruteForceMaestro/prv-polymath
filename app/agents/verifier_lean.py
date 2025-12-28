@@ -1,111 +1,93 @@
 # autogen
+from kimina_client.models import Snippet
+from kimina_client import Infotree
+from app.utils.infotree import extract_data
+from autogen_agentchat.ui import Console
 from app.config import model_client
+from app.tracing import traced
 from app.work import AgentWork
 from autogen_agentchat.agents import AssistantAgent
-from app.agents.verifier_numeric import give_verdict
-from polymath_schemas.graph import VerificationLevel
 from autogen_agentchat.conditions import FunctionCallTermination
 from autogen_agentchat.teams import RoundRobinGroupChat
-import json
-import subprocess
-from typing import Optional, List, Dict, Any
-from functools import partial
-import asyncio
-import json
-import os
-from typing import Optional
+from kimina_client import AsyncKiminaClient
+import uuid
+from dataclasses import dataclass
 
-class AsyncLean4REPL:
-    def __init__(self, project_path: str = "."):
-        self.project_path = project_path
-        self.process: Optional[asyncio.subprocess.Process] = None
-        self.env: Optional[int] = None
-        # A lock is crucial! It prevents the agent from sending a second command 
-        # before the first one finishes, which would corrupt the REPL state.
-        self._lock = asyncio.Lock()
 
-    async def _ensure_process(self):
-        """Lazily starts the Lean REPL process."""
-        if self.process is None:
-            self.process = await asyncio.create_subprocess_exec(
-                "lake", "exe", "repl",
-                cwd=self.project_path,
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
+client = AsyncKiminaClient(
+    api_url="http://localhost:8081"
+)
 
-    async def run_command(self, lean_code: str) -> str:
-        """Async function to send commands to Lean."""
-        async with self._lock:
-            await self._ensure_process()
-            
-            if not lean_code.strip():
-                return "Empty command."
 
-            # Construct request
-            request : dict[str, Any] = {"cmd": lean_code}
-            if self.env is not None:
-                request["env"] = self.env
+@dataclass(frozen=True)
+class SplitSnippet:
+    header: str
+    body: str
+    header_line_count: int
 
-            try:
-                assert self.process is not None
-                assert self.process.stdin is not None
-                assert self.process.stdout is not None
-                
-                # WRITE (Non-blocking)
-                json_req = json.dumps(request) + "\n"
-                self.process.stdin.write(json_req.encode("utf-8"))
-                await self.process.stdin.drain()
+# i couldn't figure out the import so i just copied the code lol
+def split_snippet(code: str) -> SplitSnippet:
+    """
+    Splits a code snippet into a header (imports) and body.
 
-                # READ (Non-blocking)
-                # This await releases the event loop while Lean computes
-                response_bytes = await self.process.stdout.readline()
-                
-                if not response_bytes:
-                    return "Error: Lean REPL process died."
-                
-                response = json.loads(response_bytes.decode("utf-8"))
-            
-            except Exception as e:
-                return f"System Error: {str(e)}"
+    - Header: all lines at the top that are 'import ...' or blank before the first non-import line.
+      If any import starts with 'import Mathlib', include a single 'import Mathlib' at the top of the header.
+      Other imports follow in their original order, without duplicates.
+    - Body: the rest of the code starting from the first non-import/non-blank line.
+    """
+    lines = code.splitlines()
 
-            # Update State
-            if "env" in response:
-                self.env = response["env"]
+    # Separate header from body
+    i = 0
+    while i < len(lines) and (
+        lines[i].strip() == "" or lines[i].strip().startswith("import ")
+    ):
+        i += 1
+    header_lines = [x.strip() for x in lines[:i]]
+    body = "\n".join(lines[i:])
 
-            return self._format_output(response)
+    # Process imports in header
+    import_lines = [line for line in header_lines if line.startswith("import ")]
+    imports: list[str] = []
+    seen: set[str] = set()
+    has_mathlib = False
+    for line in import_lines:
+        if line.startswith("import Mathlib"):
+            has_mathlib = True
+        else:
+            if line not in seen:
+                seen.add(line)
+                imports.append(line)
 
-    def _format_output(self, response: dict) -> str:
-        """Helper to format JSON into a string for the LLM."""
-        output = []
-        if "messages" in response:
-            for msg in response["messages"]:
-                output.append(f"[{msg.get('severity', 'info')}]: {msg.get('data', '')}")
-        if "sorries" in response:
-            for sorry in response["sorries"]:
-                output.append(f"--- Goal ---\n{sorry.get('goal', '')}")
-        if not output:
-             output.append("Command accepted.")
-        return "\n".join(output)
+    # Build final header
+    result_header: list[str] = []
+    if has_mathlib:
+        result_header.append("import Mathlib")
+    result_header.extend(imports)
 
-    async def close(self):
-        if self.process:
-            try:
-                self.process.terminate()
-                await self.process.wait()
-            except ProcessLookupError:
-                pass
-        
-repl_tool = AsyncLean4REPL()
+    header = "\n".join(result_header)
+    return SplitSnippet(header=header, body=body, header_line_count=i)
 
-async def lean_tool(command: str) -> str:
+
+@traced
+async def lean_tool(lean_code: str) -> str | list:
     """
     Execute a Lean 4 command or tactic. 
     Returns the new goal state or errors.
     Use this to prove theorems step-by-step.
     """
-    return await repl_tool.run_command(command)
+    serv_check = await client.check(
+        Snippet(id=str(uuid.uuid4()), code=lean_code),
+        timeout=600, infotree=Infotree.tactics
+    )
+
+    if not serv_check.results[0].response:
+        return "No response returned"
+    infotree = serv_check.results[0].response["infotree"]
+    snip = split_snippet(lean_code)
+    intervals = extract_data(infotree, snip.body)
+
+    return intervals
 
 lean_verifier_sys = """You are a formal verification expert in Lean 4. 
 You have access to a persistent Lean REPL.
@@ -115,9 +97,10 @@ You have access to a persistent Lean REPL.
 4. When the goal is empty, the proof is complete.
 
 Then, when your proving process concludes (either success or failure), call the 
-`give_verdict` tool to report your findings, with a stated reason to the outcome.
+`submit_answer` tool to report your findings, with a stated reason to the outcome.
 """
 
+@traced
 async def verify_lean(lean_task: str):
     """Allocates a sub-agent to attempt to verify things formally with Lean theorem prover."""
     state = AgentWork()
@@ -130,9 +113,9 @@ async def verify_lean(lean_task: str):
 
     team = RoundRobinGroupChat(
         [agent],
-        termination_condition=FunctionCallTermination("give_verdict")
+        termination_condition=FunctionCallTermination("submit_answer")
     )
 
-    await team.run(task=lean_task)
+    await Console(team.run_stream(task=lean_task))
 
     return state.result
