@@ -73,11 +73,13 @@ def get_node_info(node_id: str):
     )
 
 @traced
-def invoke_axiom(lean_rep: str, human_rep: str):
+def invoke_axiom(snake_case_id: str, lean_rep: str, human_rep: str):
     """Add a statement node to the graph, that is verified, and that has no supporting premises. 
-    Used for commonly used, widely known results. 
+    Used for commonly used, widely known results. Both human and lean (formal) representations.
+    Title of the axiom, short, in snake_case.
     """
     post_stmt = CreateStatement(
+        uid=snake_case_id,
         human_rep=human_rep,
         lean_rep=lean_rep,
         category="Axiom",
@@ -92,6 +94,7 @@ def invoke_axiom(lean_rep: str, human_rep: str):
 @traced
 def imply_new(
     premises_ids: list[str], 
+    new_stmt_snake_case_id: str,
     new_stmt_human: str,
     tactic_human: str, # how was the new stmt obtained
     new_stmt_lean: Optional[str], 
@@ -101,7 +104,8 @@ def imply_new(
 ):
     """
     Implies new statement given previously established statements.
-    Requires a representation of the new statement in both human-readable LaTeX and Lean.
+    Requires a representation of the new statement in both human-readable LaTeX and Lean. Applies a unique id to the 
+    new statement in snake_case, for database retrieval.
     Requires a representation of the tactic (how was the new statement obtained?) in both human-readable LaTeX and Lean. 
     """
 
@@ -118,6 +122,7 @@ def imply_new(
     
     # create a statement
     new_stmt = CreateStatement(
+        uid=new_stmt_snake_case_id,
         human_rep=new_stmt_human,
         lean_rep=new_stmt_lean or "No Lean representation available.",
         verification=int(VerificationLevel.SPECULATIVE),
@@ -132,8 +137,11 @@ def imply_new(
 
     filled_stmt = StatementRead.model_validate(resp)
 
+    # try to autogenerate title for the implication with ids
+    new_impl_uid = f"if_{f"_{logic_op}_".join(premises_ids)}_then_{filled_stmt.uid}"
     # create an implication
     new_impl = CreateImplication(
+        uid=new_impl_uid,
         human_rep=tactic_human,
         lean_rep=tactic_lean or "No Lean representation avaliable.",
         premises_ids=premises_ids,
@@ -178,4 +186,14 @@ def sql_query(sql_q: str):
     return make_graph_request(
         endpoint=f"/graph/metadata/query",
         body=sql_q
+    )
+
+@traced
+def graph_search(human_rep: str):
+    """Semantic search (dense vector embeddings)
+     on the Implications or Statements' human (natural language, LaTeX) representations.
+    """
+    return make_graph_request(
+        endpoint=f"/graph/vector_query",
+        body=human_rep
     )

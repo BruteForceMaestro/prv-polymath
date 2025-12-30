@@ -4,9 +4,10 @@ from dotenv import load_dotenv
 from openai import AsyncOpenAI
 from autogen_ext.models.openai import OpenAIChatCompletionClient
 from autogen_core.models import ModelInfo
-
+from datalab_sdk import AsyncDatalabClient
 
 load_dotenv()
+# also requires a DATALAB_API_KEY now
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "oopsie")
 POLYMATH_API_KEY = os.getenv("POLYMATH_API_KEY", 'oops')
@@ -40,6 +41,10 @@ budget_model_client = OpenAIChatCompletionClient(
     model_info=gpt5_info,
     timeout=600
 )
+
+# for converting pdfs to markdowns
+marker_client = AsyncDatalabClient(api_key=os.getenv('DATALAB_API_KEY'))
+
 
 semaphore = None
 

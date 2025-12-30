@@ -1,15 +1,13 @@
-from app.agents.literature_guide import research_literature
+from app.agents.literature_suggester import suggest_literature
 from app.agents.verifier_lean import verify_lean
 from app.agents.verifier_numeric import verify_numeric, setup_executor
 import asyncio
 
 # this one's intended to be manually run, not pytest
-# graph subagent is not going to be tested because fck mocking neo4j from the clientside.
-
 # literature guide 
 async def check_literature():
     task = "functional inequality f(x+y)f(x-y) ≥ f(x)^2 - f(y)^2 implies sign-definiteness. Find known proofs or approaches for showing function has constant sign or 0 under strictness. Provide references or sketches."
-    res = await research_literature(task)
+    res = await suggest_literature(task)
     print (f"\n\n FINAL FOR LIT: {res}")
 
 async def check_verifier_lean():
@@ -26,6 +24,8 @@ async def check_verifier_sympy():
     """
     res = await verify_numeric(task)
     print (f"\n\n FINAL FOR SYMPY VERIFIER: {res}")
+
+
 
 if __name__ == "__main__":
     setup_executor()

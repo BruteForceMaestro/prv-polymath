@@ -1,9 +1,15 @@
+from typing import Optional
 from app.agents.verifier_numeric import setup_executor
-from fastapi import FastAPI, BackgroundTasks
+from app.agents.doc_ingester import ingest_document
+from fastapi import FastAPI, BackgroundTasks, UploadFile, File, Form, HTTPException
+from typing import Annotated
 from pydantic import BaseModel
 from app.agents.researcher import assign_researcher
 from fastapi.middleware.cors import CORSMiddleware
 from app.tracing import configure_tracing
+from app.config import marker_client
+import tempfile
+import shutil
 
 
 # Configure custom tracing
@@ -29,6 +35,7 @@ app.add_middleware(
 
 class ProblemRequest(BaseModel):
     problem: str
+    use_lit_review: bool
 
 @app.post("/set_problem")
 async def set_problem(request: ProblemRequest, background_tasks: BackgroundTasks):
@@ -53,7 +60,22 @@ async def set_problem(request: ProblemRequest, background_tasks: BackgroundTasks
         return await assign_researcher(workflow)
 
     background_tasks.add_task(start_research)
+
+    # TODO; add thing to track progress of the thing in a streamin' way
     return {"status": "ok"}
+
+@app.post("/upload_doc")
+async def upload_document(
+    file: UploadFile = File(...)
+):
+    """Upload a document into the shared graph (not stored on the backend)"""
+    with tempfile.NamedTemporaryFile(delete=True, suffix=".pdf") as tmp_path:
+        shutil.copyfileobj(file.file, tmp_path)
+        tmp_path.flush()
+
+        result = await marker_client.convert(tmp_path.name)
+        assert result.markdown
+        await ingest_document(result.markdown)
 
 if __name__ == "__main__":
     import uvicorn

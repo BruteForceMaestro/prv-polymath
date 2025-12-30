@@ -1,3 +1,4 @@
+from app.graphtools import graph_search
 from app.graphtools import imply_new
 from app.tracing import traced
 from app.graphtools import observe_graph
@@ -7,8 +8,7 @@ from autogen_agentchat.conditions import FunctionCallTermination
 from app.config import model_client
 from autogen_agentchat.agents import AssistantAgent
 from autogen_agentchat.ui import Console
-from app.agents.graph_guide import search_in_graph
-from app.agents.literature_guide import research_literature
+from app.agents.literature_suggester import suggest_literature
 from app.agents.verifier_numeric import verify_numeric
 from app.agents.verifier_lean import verify_lean
 from app.work import AgentWork
@@ -75,7 +75,7 @@ async def assign_researcher(task: str, recursive_depth=0):
     
     researcher_tools : list[ToolType] = [
         observe_graph, get_node_info, invoke_axiom, imply_new, patch_node, comment_node,
-        search_in_graph, research_literature, verify_lean, verify_numeric, tracker.divide_and_conquer,
+        graph_search, suggest_literature, verify_lean, verify_numeric, tracker.divide_and_conquer,
         tracker.submit_answer
     ]
 

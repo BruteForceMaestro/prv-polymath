@@ -9,7 +9,8 @@ from app.graphtools import (
     patch_node,
     comment_node,
     cypher_query,
-    sql_query
+    sql_query,
+    graph_search
 )
 from polymath_schemas.graph import VerificationLevel
 from polymath_schemas.api_requests import NodePatchRequest
@@ -52,7 +53,7 @@ async def test_axiom_lifecycle_integration():
     human_rep = f"Test Axiom {VerificationLevel.VERIFIED}"
     lean_rep = "theorem test : True := trivial"
     
-    create_result = invoke_axiom(lean_rep, human_rep)
+    create_result = invoke_axiom("new_theorem", lean_rep, human_rep)
     assert isinstance(create_result, dict)
     
     assert "uid" in create_result
@@ -63,7 +64,7 @@ async def test_axiom_lifecycle_integration():
 
 @pytest.mark.asyncio
 async def test_comment_integration():
-    create_result = invoke_axiom("theorem test_comment : True := trivial", "Comment Test Node")
+    create_result = invoke_axiom("lmao_lol", "theorem test_comment : True := trivial", "Comment Test Node")
     assert isinstance(create_result, dict)
     node_id = create_result["uid"]
     
@@ -76,7 +77,7 @@ async def test_comment_integration():
 
 @pytest.mark.asyncio
 async def test_patch_node_integration():
-    create_result = invoke_axiom("theorem test_patch : True := trivial", "Original Rep")
+    create_result = invoke_axiom("what_haha", "theorem test_patch : True := trivial", "Original Rep")
     assert isinstance(create_result, dict)
     node_id = create_result["uid"]
     
@@ -86,3 +87,25 @@ async def test_patch_node_integration():
     
     node_info = get_node_info(node_id)
     assert isinstance(node_info, dict)
+
+@pytest.mark.asyncio
+async def test_null_lean_rep_imply():
+    create_result = imply_new(
+        ["new_theorem"],
+        "cool_corollary",
+        "New Corollary",
+        "This and this",
+        None,
+        None
+    )
+
+    assert isinstance(create_result, dict)
+
+@pytest.mark.asyncio
+async def test_vector_search():
+    create_res = graph_search(
+        "new corollary"
+    )
+
+    print(create_res)
+    assert isinstance(create_res, list)
