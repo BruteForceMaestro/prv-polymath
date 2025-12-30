@@ -109,6 +109,9 @@ def imply_new(
     Requires a representation of the tactic (how was the new statement obtained?) in both human-readable LaTeX and Lean. 
     """
 
+    if len(premises_ids) == 0:
+        return "You have to imply the statement from some other statement. Invoke an axiom if you need a base statement."
+
     cypher_q = """
     MATCH (s:Statement)
     WHERE s.uid IN $ids

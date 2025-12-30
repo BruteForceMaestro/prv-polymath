@@ -17,3 +17,6 @@ lean_project/.lake/
 
 # Downloaded dependencies (like the REPL library)
 lean_project/lake-packages/
+
+test.csv
+traced_log.json
