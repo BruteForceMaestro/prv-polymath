@@ -1,5 +1,4 @@
 import requests
-from app.tracing import traced
 from app.config import POLYMATH_SERVER_URL, POLYMATH_API_KEY
 from polymath_schemas.graph import VerificationLevel
 from polymath_schemas.api_requests import CreateStatement, CreateImplication, NodePatchRequest
@@ -51,7 +50,6 @@ def make_graph_request(endpoint: str, body: Any = None, method: str = "POST") ->
     
     return response.json()
 
-@traced
 def observe_graph():
     """Provide a big picture view of the state of the art - the numerically or formally verified statements."""
     cypher_q = """
@@ -65,14 +63,12 @@ def observe_graph():
         body=cypher_q
     )
 
-@traced
 def get_node_info(node_id: str):
     """Get deeper information (history of changes, comment discussions, connected nodes) about a node."""
     return make_graph_request(
         endpoint=f"/graph/nodes/{node_id}"
     )
 
-@traced
 def invoke_axiom(snake_case_id: str, lean_rep: str, human_rep: str):
     """Add a statement node to the graph, that is verified, and that has no supporting premises. 
     Used for commonly used, widely known results. Both human and lean (formal) representations.
@@ -91,7 +87,6 @@ def invoke_axiom(snake_case_id: str, lean_rep: str, human_rep: str):
         body=post_stmt.model_dump()
     )
 
-@traced
 def imply_new(
     premises_ids: list[str], 
     new_stmt_snake_case_id: str,
@@ -103,7 +98,7 @@ def imply_new(
     category: Literal['Theorem', 'Axiom', 'Definition', 'Lemma'] = "Lemma"
 ):
     """
-    Implies new statement given previously established statements.
+    Implies new statement given previously established statements (not Implications).
     Requires a representation of the new statement in both human-readable LaTeX and Lean. Applies a unique id to the 
     new statement in snake_case, for database retrieval.
     Requires a representation of the tactic (how was the new statement obtained?) in both human-readable LaTeX and Lean. 
@@ -122,7 +117,9 @@ def imply_new(
         body=cypher_q.replace("$ids", str(premises_ids)) # DEFINITELY inSECURE
     )
     assert isinstance(result, dict) # not an error
-    
+    if result['count'] == 0:
+        # none found as premises. 
+        return "There are no STATEMENTs with the premises ids provided. Maybe you tried to imply with an implication as premise but that's not allowed."
     # create a statement
     new_stmt = CreateStatement(
         uid=new_stmt_snake_case_id,
@@ -158,7 +155,6 @@ def imply_new(
         body=new_impl.model_dump()
     )
 
-@traced
 def patch_node(patch: NodePatchRequest, node_id: str):
     """Make an edit to an existing node."""
     return make_graph_request(
@@ -167,7 +163,6 @@ def patch_node(patch: NodePatchRequest, node_id: str):
         method="PATCH"
     )
 
-@traced
 def comment_node(comment: str, node_id: str):
     """Comment on a node to detail your work done, results, approaches tried, so forth."""
     return make_graph_request(
@@ -175,7 +170,6 @@ def comment_node(comment: str, node_id: str):
         body=comment
     )
 
-@traced
 def cypher_query(cypher_q: str):
     """Cypher query interface for the graph database."""
     return make_graph_request(
@@ -183,7 +177,6 @@ def cypher_query(cypher_q: str):
         body=cypher_q
     )
 
-@traced
 def sql_query(sql_q: str):
     """SQL query interface for the SQL database."""
     return make_graph_request(
@@ -191,7 +184,6 @@ def sql_query(sql_q: str):
         body=sql_q
     )
 
-@traced
 def graph_search(human_rep: str):
     """Semantic search (dense vector embeddings)
      on the Implications or Statements' human (natural language, LaTeX) representations.

@@ -1,12 +1,12 @@
 from autogen_agentchat.ui import Console
 import sympy as sp
-from app.tracing import traced
 import mpmath as mp
 import traceback
 from app.config import POLYMATH_SERVER_URL, model_client
 from app.work import AgentWork
 from autogen_agentchat.agents import AssistantAgent
-from autogen_agentchat.teams import RoundRobinGroupChat
+from app.agents.deterministic_nudger import DeterministicNudgeAgent
+from app.groupchats.nudge import NudgeGroupChat
 from autogen_agentchat.conditions import FunctionCallTermination
 from concurrent.futures import ProcessPoolExecutor
 import asyncio
@@ -95,27 +95,32 @@ class NumericVerifierWork(AgentWork):
         """Submit your SymPy/numeric verification results, with a reason for the result."""
         self.result = f"VERIFICATION SUCCESS: {verified_sympy_or_numeric} \n\n STATED REASON: {tool_verification_success_or_failure_reason}"
 
+async def verify_numeric(task: str, context: str, work: NumericVerifierWork):
+    """Allocates a sub-agent to run numeric/symbolic verification with SymPy and other Python libraries.
+    The verifier agent does not have your context or access to the graph, so provide it
+    (definitions, lemmas or statements necessary, etc.) along with the task.
+    """
 
-
-@traced
-async def verify_numeric(task: str):
-    """Allocates a sub-agent to run numeric/symbolic verification with SymPy and other Python libraries."""
-
-    state = NumericVerifierWork()
     numeric_verifier_agent = AssistantAgent(
         name="numeric_verifier",
         model_client=model_client,
-        tools=[state.submit_verification_results, verify_solution],
+        tools=[work.submit_verification_results, verify_solution],
         system_message=verifier_sys
     )
 
-    team = RoundRobinGroupChat(
-        [numeric_verifier_agent],
+    nudger = DeterministicNudgeAgent(
+        name="nudge_agent",
+        message_content="You seem to be looping. You can use `submit_verification_results` if the task is completed or can't be completed."
+    )
+
+    team = NudgeGroupChat(
+        [numeric_verifier_agent, nudger],
         termination_condition=FunctionCallTermination("submit_verification_results")
     )
 
-    await Console(team.run_stream(task=task))
+    run_task = f"Given the following context: {context}\n\n Complete the following task: {task}"
 
-    return state.result
+    await work.log_stream(team.run_stream(task=run_task))
+    return work.result
 
     

@@ -1,5 +1,4 @@
 # ingests markdown directly (but with a limit on how huge the ingested markdown can be)
-from app.tracing import traced
 from autogen_agentchat.agents import AssistantAgent
 from autogen_agentchat.ui import Console
 from autogen_agentchat.teams import RoundRobinGroupChat
@@ -29,13 +28,11 @@ When you have mapped all of the argument(s) established in the provided text, ca
 
 """
 
-@traced
-async def ingest_document(doc_text: str):
+async def ingest_document(doc_text: str, work: AgentWork):
     """Uses an AI agent to ingest a document (typically MD after conversion by Datalab) 
     and output a list of nodes and implications in the database (actually a list of logical chains)
     with a verification level determining the level of trust in something.
     """
-    work = AgentWork()
     agent = AssistantAgent(
         name="Doc_Ingester",
         model_client=budget_model_client,
@@ -48,6 +45,5 @@ async def ingest_document(doc_text: str):
         termination_condition=FunctionCallTermination("submit_answer")
     )
 
-    await Console(team.run_stream(task=f"Map the following literature to the graph: <literature>{doc_text}</literature>"))
-
+    await work.log_stream(team.run_stream(task=f"Map the following literature to the graph: <literature>{doc_text}</literature>"))
     return work.result

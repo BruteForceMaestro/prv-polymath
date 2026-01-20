@@ -4,11 +4,11 @@ from kimina_client import Infotree
 from app.utils.infotree import extract_data
 from autogen_agentchat.ui import Console
 from app.config import model_client
-from app.tracing import traced
 from app.work import AgentWork
+from app.agents.deterministic_nudger import DeterministicNudgeAgent
+from app.groupchats.nudge import NudgeGroupChat
 from autogen_agentchat.agents import AssistantAgent
 from autogen_agentchat.conditions import FunctionCallTermination
-from autogen_agentchat.teams import RoundRobinGroupChat
 from kimina_client import AsyncKiminaClient
 import uuid
 from dataclasses import dataclass
@@ -69,7 +69,6 @@ def split_snippet(code: str) -> SplitSnippet:
     return SplitSnippet(header=header, body=body, header_line_count=i)
 
 
-@traced
 async def lean_tool(lean_code: str) -> str | list:
     """
     Execute a Lean 4 command or tactic. 
@@ -100,22 +99,29 @@ Then, when your proving process concludes (either success or failure), call the
 `submit_answer` tool to report your findings, with a stated reason to the outcome.
 """
 
-@traced
-async def verify_lean(lean_task: str):
-    """Allocates a sub-agent to attempt to verify things formally with Lean theorem prover."""
-    state = AgentWork()
+async def verify_lean(lean_task: str, context: str, work: AgentWork):
+    """Allocates a sub-agent to attempt to verify things formally with Lean theorem prover.
+    The verifier agent does not have your context or access to the graph, so provide it 
+    (definitions, lemmas or statements necessary, etc.) along with the task.
+    """
     agent = AssistantAgent(
         name="lean_verifier",
         system_message=lean_verifier_sys,
         model_client=model_client,
-        tools=[lean_tool, state.submit_answer],
+        tools=[lean_tool, work.submit_answer],
     )
 
-    team = RoundRobinGroupChat(
-        [agent],
+    nudger = DeterministicNudgeAgent(
+        name="nudge_agent",
+        message_content="You seem to be looping. You can use `submit_answer` if the task is completed or can't be completed."
+    )
+
+    team = NudgeGroupChat(
+        [agent, nudger],
         termination_condition=FunctionCallTermination("submit_answer")
     )
 
-    await Console(team.run_stream(task=lean_task))
+    run_task = f"Given the following context: <context>{context}</context>\n\n Complete the following task: <current_goal>{lean_task}</current_goal>"
 
-    return state.result
+    await work.log_stream(team.run_stream(task=run_task))
+    return work.result

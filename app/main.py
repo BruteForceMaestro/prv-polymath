@@ -1,3 +1,5 @@
+from app.agents.researcher import ResearcherWork
+from app.work import AgentWork
 from typing import Optional
 from app.agents.verifier_numeric import setup_executor
 from app.agents.doc_ingester import ingest_document
@@ -7,8 +9,9 @@ from pydantic import BaseModel
 from app.agents.researcher import assign_researcher
 from fastapi.middleware.cors import CORSMiddleware
 from app.tracing import configure_tracing
-from app.config import marker_client, px_client
-from app.tracing import configure_tracing, tracer, build_trace_tree, reconstruct_polymath_tree
+from app.config import marker_client
+from app.tracing import configure_tracing
+from app.graphtools import make_graph_request
 from opentelemetry import trace, context
 import tempfile
 import shutil
@@ -37,16 +40,22 @@ class ProblemRequest(BaseModel):
     problem: str
     use_lit_review: bool
 
+@app.get("/graph")
+def get_graph():
+    return make_graph_request(
+        "/graph/query",
+        body="MATCH (n) RETURN n;"
+    )
+
+current_work = ResearcherWork()
+
 @app.post("/set_problem")
 async def set_problem(request: ProblemRequest, background_tasks: BackgroundTasks):
-    span = tracer.start_span("researcher.set_problem")
-    ctx = trace.set_span_in_context(span)
-    trace_id = f"{span.get_span_context().trace_id:032x}"
-
     async def start_research():
-        token = context.attach(ctx)
-        try:
-            workflow = f"""
+        global current_work
+        current_work = ResearcherWork() # NOTE: there is only one instance active at a time i can't be bothered with multiple instances for now.
+  
+        workflow = f"""
         Solve the problem:
         <problem>
         {request.problem}
@@ -55,18 +64,12 @@ async def set_problem(request: ProblemRequest, background_tasks: BackgroundTasks
         to verify your solution step by step using the graph as scaffolding, and the Lean and SymPy
         verifiers, to avoid hallucination.
         """
-            return await assign_researcher(workflow)
-        except Exception as e:
-            span.record_exception(e)
-            span.set_status(trace.Status(trace.StatusCode.ERROR))
-            raise e
-        finally:
-            span.end()
-            context.detach(token)
+        
+        return await assign_researcher(workflow, current_work)
 
     background_tasks.add_task(start_research)
     
-    return {"status": "ok", "trace_id": trace_id}
+    return {"status": "ok"}
 
 @app.post("/upload_doc")
 async def upload_document(
@@ -79,75 +82,14 @@ async def upload_document(
 
         result = await marker_client.convert(tmp_path.name)
         assert result.markdown
-        await ingest_document(result.markdown)
 
-@app.get("/trace/{trace_id}")
-async def get_trace_tree(trace_id: str):
-    try:
-        
-        df = px_client.spans.get_spans_dataframe()
-        if df.empty:
-            raise HTTPException(status_code=404, detail="Phoenix storage is empty.")
+        work = AgentWork()
+        return await ingest_document(result.markdown, work)
 
-        # 2. Filter by Trace ID
-        # Your schema uses 'context.trace_id'
-        trace_df = df[df['context.trace_id'] == trace_id].copy()
+@app.get("/get_status")
+async def get_trace_tree():
+    return current_work
 
-        if trace_df.empty:
-            raise HTTPException(status_code=404, detail=f"Trace {trace_id} not found.")
-
-        # 3. Clean Data for JSON Serialization
-        # Pandas NaNs break FastAPI JSON response, replace with None
-        trace_df = trace_df.replace({np.nan: None})
-
-        # 4. Map Dataframe Rows to Clean Dicts
-        clean_spans = []
-        
-        # We iterate over the filtered dataframe
-        for _, row in trace_df.iterrows():
-            
-            # Collect all 'attributes.*' columns into a nested dictionary
-            # This keeps your main node clean but preserves all agent data (inputs/outputs/tokens)
-            attributes = {}
-            for col in trace_df.columns:
-                if col.startswith("attributes."):
-                    # Remove prefix for cleaner JSON keys: 'attributes.input.value' -> 'input.value'
-                    key = col.replace("attributes.", "")
-                    val = row[col]
-                    if val is not None:
-                        attributes[key] = val
-
-            span_obj = {
-                # Core Identity
-                "span_id": row.get("context.span_id"),
-                "parent_id": row.get("parent_id"),
-                "trace_id": row.get("context.trace_id"),
-                "name": row.get("name"),
-                
-                # Timing (Convert timestamps to string if they are datetime objects)
-                "start_time": str(row.get("start_time")),
-                "end_time": str(row.get("end_time")),
-                
-                # Status
-                "status_code": row.get("status_code"),
-                "status_message": row.get("status_message"),
-                
-                # The Payload (Your AutoGen messages, LLM inputs, etc.)
-                "attributes": attributes
-            }
-            clean_spans.append(span_obj)
-
-        # 5. Build Tree
-        tree = build_trace_tree(clean_spans)
-
-        # 6. clean up to get the semantic tree
-        clean_tree = reconstruct_polymath_tree(tree)
-        
-        return clean_tree
-
-    except Exception as e:
-        # In production, log this error
-        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn

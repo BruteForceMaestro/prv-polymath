@@ -1,4 +1,3 @@
-from app.tracing import traced
 from typing import List, Dict, Literal
 from ddgs import DDGS
 import arxiv
@@ -83,10 +82,7 @@ To submit your helpful literature suggestions to the user, use the `submit_lit_s
 
 """
 
-@traced
-async def suggest_literature(task: str):
-    work = LiteratureSuggesterWork()
-
+async def suggest_literature(task: str, work: LiteratureSuggesterWork):
     agent = AssistantAgent(
         name="Literature_Suggester",
         model_client=budget_model_client,
@@ -95,7 +91,7 @@ async def suggest_literature(task: str):
     )
 
     nudge = DeterministicNudgeAgent(
-        name="NudgeBot",
+        name="nudge_agent",
         message_content="You seem to be looping. Please evaluate your progress and use the 'submit_lit_suggestions' tool if you are finished."
     )
 
@@ -104,6 +100,5 @@ async def suggest_literature(task: str):
         termination_condition=FunctionCallTermination("submit_lit_suggestions")
     )
 
-    await Console(team.run_stream(task=f"Suggest literature sources, that could be useful in solving this problem: {task}"))
-
+    await work.log_stream(team.run_stream(task=f"Suggest literature sources, that could be useful in solving this problem: {task}"))
     return work.result
