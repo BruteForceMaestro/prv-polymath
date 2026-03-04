@@ -6,6 +6,8 @@ dist/
 wheels/
 *.egg-info
 
+upload_test/
+
 # Virtual environments
 .venv
 .env
@@ -20,3 +22,4 @@ lean_project/lake-packages/
 
 test.csv
 traced_log.json
+.DS_Store

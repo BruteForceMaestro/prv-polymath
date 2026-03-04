@@ -5,6 +5,7 @@ from app.agents.literature_suggester import suggest_literature
 from app.agents.verifier_lean import verify_lean
 from app.agents.verifier_numeric import verify_numeric, setup_executor
 from app.graphtools import make_graph_request
+from app.agents.doc_ingester import ingest_document
 import asyncio
 
 # this one's intended to be manually run, not pytest
@@ -47,6 +48,7 @@ async def check_result_of_query():
     )
 
     print(result)
+
 
 if __name__ == "__main__":
     setup_executor()
